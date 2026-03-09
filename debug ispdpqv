@@ -1,4 +1,5 @@
-WITH CTE AS (SELECT  
+WITH GA4_YETI AS (
+SELECT  
   DISTINCT GA_SESSION_ID,
   YETI.EVENT_DATE, 
   FIRST_VALUE(GEO.COUNTRY IGNORE NULLS) OVER (PARTITION BY GA_SESSION_ID ORDER BY EVENT_TIMESTAMP ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) COUNTRY,
@@ -50,11 +51,8 @@ WITH CTE AS (SELECT
     ELSE 0
     END ISPDP,--v2
   FIRST_VALUE(CASE
-    WHEN (PAGE.PAGE_PATH LIKE '%/products/%' 
-        AND REGEXP_CONTAINS(LOWER(PAGE.PAGE_PATH), r'ab[0-9]{1,6}')) 
-      OR (EVENT_NAME = 'open_drawer' 
-        AND DRAWER_SUBTYPE ='Product') THEN 1 ELSE 0
-    END IGNORE NULLS) OVER (PARTITION BY GA_SESSION_ID ORDER BY YETI.EVENT_DATE ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) ISPDPQV,
+    WHEN (PAGE.PAGE_PATH LIKE '%/products/%' AND REGEXP_CONTAINS(LOWER(PAGE.PAGE_PATH), r'ab[0-9]{1,6}')) OR (EVENT_NAME = 'open_drawer' AND DRAWER_SUBTYPE ='Product') THEN 1
+    END IGNORE NULLS) OVER (PARTITION BY GA_SESSION_ID ORDER BY EVENT_TIMESTAMP ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) ISPDPQV,
   FIRST_VALUE(
     CASE
       WHEN (EVENT_NAME = "search_executed" AND SEARCH_NUMBER_OF_RESULTS != 0) THEN 1 END 
@@ -136,8 +134,6 @@ FIRST_VALUE (DEVICE.WEB_INFO.HOSTNAME IGNORE NULLS
       ORDER BY EVENT_TIMESTAMP 
       ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
   )) TRAFFIC_CAMPAIGN_FIRST,
-  page.page_location,
-  page.page_path
 FROM `koreabeta.LR_testing.ga4_flat_events` YETI
   LEFT JOIN `koreabeta.GIMLI.PALANTIR` PAL1
     ON USER_PSEUDO_ID = PAL1.USER_ID
@@ -145,14 +141,356 @@ FROM `koreabeta.LR_testing.ga4_flat_events` YETI
     ON GA_SESSION_ID = PAL2.SESSION_ID
 WHERE PAL1.USER_ID IS NULL 
   AND PAL2.SESSION_ID IS NULL 
-  AND YETI.EVENT_DATE = "2026-01-06"  
+  AND YETI.EVENT_DATE >= "2023-09-17"  
   AND TRAFFIC_TYPE IS NULL  
   AND DEVICE.WEB_INFO.HOSTNAME IN ('abcam.com','www.abcam.com','www.abcam.cn','abcam.cn','www.abcam.co.jp','abcam.co.jp')  
-  )
-SELECT page_location,page_path, 
-CASE WHEN PAGE_PATH LIKE '%/products/%' AND REGEXP_CONTAINS(LOWER(PAGE_PATH), r'ab[0-9]{1,6}') THEN 1 END,
-COUNT(GA_SESSION_ID)
-FROM CTE
-WHERE COUNTRY = 'China' AND ISPDPQV = 0 AND PAGE_LOCATION LIKE '%product%'
-GROUP BY 1,2
-order by COUNT(GA_SESSION_ID) desc
+),
+NOTSPAM AS (
+  SELECT *,
+    CASE
+        WHEN country IN ("Argentina", "Aruba", "Bahamas", "Barbados", 
+                            "Belize", "Bermuda", "Bolivia", "Brazil", 
+                            "Canada", "Cayman Islands", "Chile", "Colombia", 
+                            "Costa Rica", "Dominica", "Dominican Republic", 
+                            "Ecuador", "El Salvador", "French Guiana", 
+                            "Grenada", "Guadeloupe", "Guatemala", "Guyana", 
+                            "Haiti", "Honduras", "Jamaica", "Mexico", 
+                            "Nicaragua", "Panama", "Paraguay", "Peru", 
+                            "Puerto Rico", "United States", "Uruguay", 
+                            "Venezuela","Antigua & Barbuda","Trinidad & Tobago") THEN "Americas"
+        WHEN country IN ("China", "Hong Kong") THEN "China"
+        WHEN country IN ("Afghanistan", "Albania", "Algeria", 
+                                "Andorra", "Armenia", "Austria", "Azerbaijan", 
+                                "Bahrain", "Belarus", "Belgium", "Benin", 
+                                "Bosnia & Herzegovina", "Botswana", "Bulgaria", 
+                                "Cameroon", "Croatia", "Cyprus", "Denmark", 
+                                "Egypt", "Estonia", "Ethiopia", "Faroe Islands", 
+                                "Finland", "France", "Gabon", "Gambia", 
+                                "Germany", "Ghana", "Gibraltar", "Greece", 
+                                "Greenland", "Hungary", "Iceland", "Iraq", 
+                                "Ireland", "Israel", "Italy", "Jordan", 
+                                "Kenya", "Kuwait", "Kyrgyzstan", "Latvia", 
+                                "Lebanon", "Liechtenstein", "Lithuania", 
+                                "Luxembourg", "Madagascar", "Malawi", "Malta", 
+                                "Martinique", "Monaco", "Montenegro", 
+                                "Morocco", "Mozambique", "Netherlands", 
+                                "Nigeria", "Norway", "Oman", "Poland", 
+                                "Portugal", "Qatar", "Romania", "Saudi Arabia", 
+                                "Senegal", "Serbia", "Sierra Leone", "Slovakia", 
+                                "Slovenia", "South Africa", "Spain", "Sweden", 
+                                "Switzerland", "Tanzania", "Tunisia", "Türkiye", 
+                                "Uganda", "Ukraine", "United Arab Emirates", 
+                                "United Kingdom", "Yemen", "Zambia","Turkey","Russia","Czechia","Iran","Côte d’Ivoire","Réunion") THEN "EMEA"
+        WHEN country = "Japan" THEN "Japan"
+        WHEN country IN ("Australia", "Bangladesh", "Cambodia", 
+                                "Georgia", "Guam", "India", "Indonesia", 
+                                "Kazakhstan", "Macao", "Malaysia", "Nepal", 
+                                "New Caledonia", "New Zealand", "Pakistan", 
+                                "Papua New Guinea", "Philippines", "Singapore", 
+                                "South Korea", "Sri Lanka", "Taiwan", 
+                                "Thailand", "Vietnam") THEN "Rest of APAC"
+        ELSE "NULL"
+      END AS salesRegion,
+
+--- REJECT ALL AND CONSENT MODE ADJUSTMENT, DATE RANGE BEFORE COOKIE WAS IMPLEMENTED ---
+  CASE
+  WHEN EVENT_DATE < '2024-01-16' THEN (
+    CASE 
+      WHEN COUNTRY = 'Austria' THEN 0.72
+      WHEN COUNTRY = 'Belgium' THEN 0.69
+      WHEN COUNTRY = 'Bulgaria' THEN 0.46
+      WHEN COUNTRY = 'Croatia' THEN 0.81
+      WHEN COUNTRY = 'Cyprus' THEN 0.65
+      WHEN COUNTRY = 'Denmark' THEN 0.89
+      WHEN COUNTRY = 'Estonia' THEN 0.72
+      WHEN COUNTRY = 'Finland' THEN 0.77
+      WHEN COUNTRY = 'France' THEN 0.62
+      WHEN COUNTRY = 'Germany' THEN 0.64
+      WHEN COUNTRY = 'Greece' THEN 0.68
+      WHEN COUNTRY = 'Hungary' THEN 0.76
+      WHEN COUNTRY = 'Ireland' THEN 0.66
+      WHEN COUNTRY = 'Italy' THEN 0.88
+      WHEN COUNTRY = 'Latvia' THEN 0.85
+      WHEN COUNTRY = 'Lithuania' THEN 0.76
+      WHEN COUNTRY = 'Luxembourg' THEN 0.67
+      WHEN COUNTRY = 'Malta' THEN 0.78
+      WHEN COUNTRY = 'Netherlands' THEN 0.57
+      WHEN COUNTRY = 'Poland' THEN 0.92
+      WHEN COUNTRY = 'Portugal' THEN 0.73
+      WHEN COUNTRY = 'Romania' THEN 0.61
+      WHEN COUNTRY = 'Slovakia' THEN 0.80
+      WHEN COUNTRY = 'Slovenia' THEN 0.85
+      WHEN COUNTRY = 'Spain' THEN 0.64
+      WHEN COUNTRY = 'Sweden' THEN 0.72
+      WHEN COUNTRY = 'United Kingdom' THEN 0.65
+      WHEN COUNTRY = 'Norway' THEN 0.72
+    ELSE 1
+    END)
+  WHEN EVENT_DATE >= '2024-01-16' AND EVENT_DATE < '2024-04-24' THEN (
+    CASE 
+      WHEN COUNTRY = 'Austria' THEN 0.819811
+      WHEN COUNTRY = 'Belgium' THEN 0.819811
+      WHEN COUNTRY = 'Bulgaria' THEN 0.819811
+      WHEN COUNTRY = 'Croatia' THEN 0.819811
+      WHEN COUNTRY = 'Cyprus' THEN 0.819811
+      WHEN COUNTRY = 'Denmark' THEN 0.819811
+      WHEN COUNTRY = 'Estonia' THEN 0.819811
+      WHEN COUNTRY = 'Finland' THEN 0.819811
+      WHEN COUNTRY = 'France' THEN 0.819811
+      WHEN COUNTRY = 'Germany' THEN 0.819811
+      WHEN COUNTRY = 'Greece' THEN 0.819811
+      WHEN COUNTRY = 'Hungary' THEN 0.819811
+      WHEN COUNTRY = 'Ireland' THEN 0.819811
+      WHEN COUNTRY = 'Italy' THEN 0.819811
+      WHEN COUNTRY = 'Latvia' THEN 0.819811
+      WHEN COUNTRY = 'Lithuania' THEN 0.819811
+      WHEN COUNTRY = 'Luxembourg' THEN 0.819811
+      WHEN COUNTRY = 'Malta' THEN 0.819811
+      WHEN COUNTRY = 'Netherlands' THEN 0.819811
+      WHEN COUNTRY = 'Poland' THEN 0.819811
+      WHEN COUNTRY = 'Portugal' THEN 0.819811
+      WHEN COUNTRY = 'Romania' THEN 0.819811
+      WHEN COUNTRY = 'Slovakia' THEN 0.819811
+      WHEN COUNTRY = 'Slovenia' THEN 0.819811
+      WHEN COUNTRY = 'Spain' THEN 0.819811
+      WHEN COUNTRY = 'Sweden' THEN 0.819811
+      WHEN COUNTRY = 'United Kingdom' THEN 0.819811
+    ELSE 1
+    END) 
+----------------------------------------------------------------------------------------
+--- US DUPLICATION FIX ---
+    WHEN EVENT_DATE>='2024-07-02' AND EVENT_DATE <='2024-07-24' AND COUNTRY = 'United States' THEN (
+      CASE
+        WHEN EVENT_DATE = '2024-07-02' THEN 0.647645825
+        WHEN EVENT_DATE = '2024-07-03' THEN 0.92413816
+        WHEN EVENT_DATE = '2024-07-04' THEN 0.803080182
+        WHEN EVENT_DATE = '2024-07-05' THEN 0.855312457
+        WHEN EVENT_DATE = '2024-07-06' THEN 0.845394236
+        WHEN EVENT_DATE = '2024-07-07' THEN 0.870899848
+        WHEN EVENT_DATE = '2024-07-08' THEN 0.889064593
+        WHEN EVENT_DATE = '2024-07-09' THEN 0.908813605
+        WHEN EVENT_DATE = '2024-07-10' THEN 0.915234613
+        WHEN EVENT_DATE = '2024-07-11' THEN 0.899748522
+        WHEN EVENT_DATE = '2024-07-12' THEN 0.896551556
+        WHEN EVENT_DATE = '2024-07-13' THEN 0.890703228
+        WHEN EVENT_DATE = '2024-07-14' THEN 0.87815795
+        WHEN EVENT_DATE = '2024-07-15' THEN 0.899612058
+        WHEN EVENT_DATE = '2024-07-16' THEN 0.902970138
+        WHEN EVENT_DATE = '2024-07-17' THEN 0.90379263
+        WHEN EVENT_DATE = '2024-07-18' THEN 0.906703643
+        WHEN EVENT_DATE = '2024-07-19' THEN 0.915012667
+        WHEN EVENT_DATE = '2024-07-20' THEN 0.900262261
+        WHEN EVENT_DATE = '2024-07-21' THEN 0.859967891
+        WHEN EVENT_DATE = '2024-07-22' THEN 0.887888916
+        WHEN EVENT_DATE = '2024-07-23' THEN 0.900403245
+        WHEN EVENT_DATE = '2024-07-24' THEN 0.982258048
+      ELSE 1
+      END)
+    WHEN COUNTRY = 'China' AND EVENT_DATE >= '2025-9-22'  THEN 1.1
+
+    ELSE 1
+  END AS ADJUSTMENT_RATES,
+--------------------------
+--- ADHOC Bot Spam done here ---
+  CASE 
+    WHEN CITY = 'Des Moines' AND
+      (CASE WHEN SESSION_DURATION <=.5 THEN 'BOTTY' END) = 'BOTTY' THEN 'SPAM' 
+    WHEN COUNTRY = 'United States' AND BROWSER_VERSION ='92.0.4515.159' THEN 'SPAM'
+    WHEN CITY IN ('Dublin','Ashburn','Des Moines') AND BROWSER_VERSION = '131.0.0.0' THEN 'SPAM'
+    WHEN CITY IN ('Dublin','Ashburn','Des Moines') AND OPERATING_SYSTEM = 'Linux'  THEN 'SPAM'
+    WHEN EVENT_DATE IN ("2025-06-02","2025-06-03","2025-06-06") AND COUNTRY = "United States" AND OPERATING_SYSTEM = 'Linux'  THEN 'SPAM' 
+    WHEN (EVENT_DATE IN ("2025-06-02","2025-06-03") OR EVENT_DATE >= "2025-06-10") AND COUNTRY = "United States" AND OPERATING_SYSTEM = 'Windows' AND BROWSER_VERSION = "128.0" THEN 'SPAM'
+    WHEN (EVENT_DATE IN ("2025-06-02","2025-06-03","2025-06-10") OR EVENT_DATE >= "2025-06-10") AND COUNTRY = "United States" AND OPERATING_SYSTEM = 'Macintosh' AND BROWSER_VERSION = "73.0.3683.75" THEN 'SPAM'
+    WHEN EVENT_DATE >= '2025-07-03' AND COUNTRY = "United States" AND CITY ="Columbus" AND OPERATING_SYSTEM = 'Linux' THEN 'SPAM'
+    # WHEN YETI2 LAUNCHES, ADD ACTUAL DATE TO THE LINE BELOW. EXAMPLE IF WE LAUNCH AUGUST 5TH, EVENT_DATE <= '2025-08-05' AND
+    WHEN EVENT_DATE <= '2025-08-01'AND ISYETI2 = "true" THEN 'SPAM'
+    WHEN EVENT_DATE IN ("2025-07-16","2025-07-18","2025-07-20") AND COUNTRY = "United States" AND CITY ="Boxborough" THEN 'SPAM'
+    WHEN EVENT_DATE >= "2025-08-14" AND COUNTRY = "China" AND OPERATING_SYSTEM = "Windows" AND BROWSER_VERSION = "134.0.0.0" THEN 'SPAM'
+    WHEN EVENT_DATE >= '2026-01-01' AND OPERATING_SYSTEM = 'Windows' AND BROWSER_VERSION = '136.0.0.0' THEN 'SPAM'
+    WHEN EVENT_DATE >= '2026-01-28' AND CITY = 'Maynard' AND OPERATING_SYSTEM = 'Macintosh' AND BROWSER_VERSION = '134.0.0.0' THEN 'SPAM' 
+    # ADD NEW BOT LOGIC ABOVE THIS 
+    # ONCE DONE JUST COPY PASTE ENTIRE CODE INTO NEXT GA4 YETI SCHEDULE 6/7/8 UTC-4
+    # COPY BOT LOGIC ONLY AND PASTE INTO GA4 YETI PRODUCT
+    # DON'T FORGET TO UPDATE SCHEDULE AND SET FOR FUTURE DATE
+  ELSE 'REMOVED'
+  END ADHOC_SPAM_REMOVAL,
+--------------------------------
+  CASE
+    WHEN REGEXP_CONTAINS(LANDING_PAGE, r"/en-[a-z]{2}$") THEN 'Homepage'
+    WHEN LANDING_PAGE LIKE '%products%' AND REGEXP_CONTAINS(LOWER(LANDING_PAGE), r'ab[0-9]{1,6}') THEN 'PDP'
+    WHEN LANDING_PAGE LIKE '%search%' THEN 'Search'
+  ELSE 'Other'
+  END AS LANDING_PAGE_TYPE,
+  CASE
+    WHEN FIRSTTIMESTAMP_ISSEARCHWITHRESULTS < FIRSTTIMESTAMP_ISPDPQV THEN 1
+    ELSE 0
+    END ISSEARCHWITHRESULTSTOPDP,
+--- FILLING MISSING SOURCE/MEDIUM NULLS ---
+  COALESCE(
+    LAST_VALUE(TRAFFIC_SOURCE_FIRST IGNORE NULLS
+      ) OVER (
+        PARTITION BY USER_PSEUDO_ID 
+        ORDER BY GA_SESSION_ID ASC
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW),
+    FIRST_VALUE(TRAFFIC_SOURCE_FIRST IGNORE NULLS
+      ) OVER (
+        PARTITION BY USER_PSEUDO_ID 
+        ORDER BY GA_SESSION_ID  ASC
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+    ) USER_SOURCE_LAST_OR_FIRST,
+  COALESCE(
+    LAST_VALUE(TRAFFIC_MEDIUM_FIRST IGNORE NULLS 
+      ) OVER (
+        PARTITION BY USER_PSEUDO_ID 
+        ORDER BY GA_SESSION_ID ASC
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW),
+    FIRST_VALUE(TRAFFIC_MEDIUM_FIRST IGNORE NULLS
+      ) OVER (
+        PARTITION BY USER_PSEUDO_ID 
+        ORDER BY GA_SESSION_ID  ASC
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+    ) USER_MEDIUM_LAST_OR_FIRST,
+  COALESCE(
+    LAST_VALUE(TRAFFIC_CAMPAIGN_FIRST IGNORE NULLS 
+      ) OVER (
+        PARTITION BY USER_PSEUDO_ID 
+        ORDER BY GA_SESSION_ID ASC
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW),
+    FIRST_VALUE(TRAFFIC_CAMPAIGN_FIRST IGNORE NULLS
+      ) OVER (
+        PARTITION BY USER_PSEUDO_ID 
+        ORDER BY GA_SESSION_ID  ASC
+        ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+    ) USER_CAMPAIGN_LAST_OR_FIRST
+-------------------------------------------
+  FROM GA4_YETI
+  WHERE NOT (
+    COALESCE(LOWER(TRAFfIC_SOURCE_FIRST), '') = 'google' AND
+    COALESCE(LOWER(TRAFFIC_MEDIUM_FIRST), '') = 'cpc' AND
+    COALESCE(LOWER(TRAFFIC_CAMPAIGN_FIRST), '') = 'google merchant listing')
+),
+CLEANED_ATTRIBUTION AS (
+  SELECT *,
+
+---ATTRIBUTION CLEAN UP---
+  CASE
+    WHEN TRAFFIC_SOURCE_FIRST IS NULL AND TRAFFIC_MEDIUM_FIRST IS NULL THEN USER_SOURCE_LAST_OR_FIRST
+    WHEN COUNTRY != 'China' AND SESSION_GOOGLE_ADS IS NOT NULL THEN 'google_ads'
+    WHEN EVENT_DATE < '2025-01-01' AND SESSION_IGNORE_REFERRER IS NOT NULL THEN 'google.com'
+    WHEN TRAFFIC_SOURCE_FIRST IS NULL AND TRAFFIC_MEDIUM_FIRST IS NULL AND LANDING_PAGE LIKE '%/search%' THEN 'unidentified'
+    ELSE TRAFFIC_SOURCE_FIRST
+    END SESSION_SOURCE,
+  CASE
+    WHEN TRAFFIC_SOURCE_FIRST IS NULL AND TRAFFIC_MEDIUM_FIRST IS NULL THEN USER_MEDIUM_LAST_OR_FIRST
+    WHEN TRAFFIC_MEDIUM_FIRST LIKE '%organic%' AND REGEXP_CONTAINS(LOWER(TRAFFIC_SOURCE_FIRST),r'(google|bing|baidu)') AND LANDING_PAGE LIKE '%/search%' THEN 'cpc'
+    WHEN COUNTRY != 'China' AND SESSION_GOOGLE_ADS IS NOT NULL THEN 'google_ads'
+    WHEN EVENT_DATE < '2025-01-01' AND SESSION_IGNORE_REFERRER IS NOT NULL THEN 'referral'
+    WHEN TRAFFIC_SOURCE_FIRST IS NULL AND TRAFFIC_MEDIUM_FIRST IS NULL AND LANDING_PAGE LIKE '%/search%' THEN 'cpc'
+    ELSE TRAFFIC_MEDIUM_FIRST
+    END SESSION_MEDIUM,
+  CASE
+    WHEN TRAFFIC_CAMPAIGN_FIRST IS NULL THEN USER_CAMPAIGN_LAST_OR_FIRST
+    ELSE TRAFFIC_CAMPAIGN_FIRST
+    END SESSION_CAMPAIGN,
+---------------------------
+  FROM NOTSPAM
+  WHERE ADHOC_SPAM_REMOVAL = 'REMOVED'
+),
+ADJUSTED AS(
+SELECT 
+  GA_SESSION_ID,
+  EVENT_DATE,
+  COUNTRY,
+  CITY,
+  SALESREGION, 
+  SESSION_SOURCE,
+  SESSION_MEDIUM,
+  SESSION_CAMPAIGN,
+  DOMAIN,
+  LANDING_PAGE,
+  LANDING_PAGE_TYPE, 
+  ISYETI2, 
+  MAX(ISSESSION) AS ISSESSION,
+  MAX(ISPDP) AS ISPDP,
+  MAX(ISPDPQV) AS ISPDPQV,
+  MAX(ISSESSION * ADJUSTMENT_RATES) AS ADJUSTEDSESSION,
+  MAX(ISPDP * ADJUSTMENT_RATES) AS ADJUSTEDPDPSESSION,
+  MAX(ISPDPQV * ADJUSTMENT_RATES) AS ADJUSTEDPDPQVSESSION,
+  MAX(ISSEARCHZERORESULTS) AS SEARCHZERORESULTSSESSION,
+  MAX(ISSEARCHZERORESULTS * ADJUSTMENT_RATES) AS ADJUSTEDSEARCHZERORESULTSSESSION,
+  MAX(ISSEARCHWITHRESULTS) AS SEARCHWITHRESULTSSESSION,
+  MAX(ISSEARCHWITHRESULTS * ADJUSTMENT_RATES) AS ADJUSTEDSEARCHWITHRESULTSSESSION,
+  MAX(ISSEARCHWITHRESULTSTOPDP) AS SEARCHWITHRESULTSTOPDPSESSION,
+  MAX(ISSEARCHWITHRESULTSTOPDP * ADJUSTMENT_RATES) AS ADJUSTEDSEARCHWITHRESULTSTOPDPSESSION,
+  MAX(ISNEWVISITOR) AS ISNEWVISITOR,
+  MAX(ISNEWVISITOR * ADJUSTMENT_RATES) AS ADJUSTEDISNEWVISITOR,
+  MAX(ISBOUNCESESSION) AS ISBOUNCESESSION,
+  MAX(ISBOUNCESESSION * ADJUSTMENT_RATES) AS ADJUSTEDISBOUNCESESSION,
+  MAX(ISBASKET) AS ISBASKET,
+  MAX(ISBASKET * ADJUSTMENT_RATES) AS ADJUSTEDISBASKET,
+  MAX(ISCONFIRMATION) AS ISCONFIRMATION,
+  MAX(ISCONFIRMATION * ADJUSTMENT_RATES) AS ADJUSTEDISCONFIRMATION,
+  MAX (SESSION_DURATION) AS SESSION_DURATION
+
+FROM CLEANED_ATTRIBUTION
+GROUP BY
+GA_SESSION_ID,
+EVENT_DATE,
+COUNTRY,
+CITY,
+SALESREGION,
+SESSION_SOURCE,
+SESSION_MEDIUM,
+SESSION_CAMPAIGN,
+DOMAIN,
+LANDING_PAGE,
+LANDING_PAGE_TYPE,
+ISYETI2
+)
+SELECT 
+  EVENT_DATE, 
+  COUNTRY `Country`,
+  CITY `City`,
+  SALESREGION `Sales Region`,
+  SESSION_SOURCE `Session Source`,
+  SESSION_MEDIUM `Session Medium`,
+  SESSION_CAMPAIGN `Session Campaign`,
+  LANDING_PAGE `Session Landing Page`,
+  LANDING_PAGE_TYPE `Session Landing Page Type`,
+  ISYETI2 `Is Yeti2`,
+  DOMAIN `Domain`,
+  SUM (ISSESSION) `Number of Sessions`,
+  SUM (ADJUSTEDSESSION) `Adjusted Number of Sessions`,
+  SUM (ISPDP) `Number of PDP Sessions`, 
+  SUM (ADJUSTEDPDPSESSION) `Adjusted Number of PDP Sessions`,
+  SUM (ISPDPQV) `Number of PDPQV Sessions`, 
+  SUM (ADJUSTEDPDPQVSESSION) `Adjusted Number of PDPQV Sessions`,
+  SUM (SEARCHZERORESULTSSESSION) `Number of Zero-Search-Results Sessions`,
+  SUM (ADJUSTEDSEARCHZERORESULTSSESSION) `Adjusted Number of Zero-Search-Results Sessions`,
+  SUM (SEARCHWITHRESULTSSESSION) `Number of Search-with-Results Sessions`,
+  SUM (ADJUSTEDSEARCHWITHRESULTSSESSION) `Adjusted Number of Search-with-Results Sessions`,
+  SUM (SEARCHWITHRESULTSTOPDPSESSION) `Number of Search-with-Results to PDP Sessions`,
+  SUM (ADJUSTEDSEARCHWITHRESULTSTOPDPSESSION) `Adjusted Number of Search-with-Results to PDP Sessions`,
+  SUM(ISNEWVISITOR) `Number of New Visitors`,
+  SUM (ADJUSTEDISNEWVISITOR) `Adjusted Number of New Visitors`,
+  SUM(ISBOUNCESESSION)`Number of Bounce Sessions`,
+  SUM (ADJUSTEDISBOUNCESESSION) `Adjusted Number of Bounce Sessions`,
+  SUM(ISBASKET) `Number of Basket Sessions`,
+  SUM (ADJUSTEDISBASKET) `Adjusted Number of Basket Sessions`,
+  SUM(ISCONFIRMATION) `Number of Order Confirmation Sessions`,
+  SUM (ADJUSTEDISCONFIRMATION) `Adjusted Number of Order Confirmation Sessions`,
+  SUM (SESSION_DURATION) `Session Duration in Seconds`,
+  'GA4-YETI' `Data Source`
+FROM ADJUSTED
+GROUP BY 
+EVENT_DATE,  
+COUNTRY,
+CITY,
+SALESREGION,
+SESSION_SOURCE,
+SESSION_MEDIUM,
+SESSION_CAMPAIGN,
+DOMAIN,
+ISYETI2,
+LANDING_PAGE,
+LANDING_PAGE_TYPE
